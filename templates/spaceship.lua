@@ -6,7 +6,7 @@ function (pos, vel)
     physics = Physics{vel=vel},
     colour = {love.math.random(), love.math.random(), 0.5},
     rect = {width=width, height=height},
-    rectangleCollider = {width=width, height=height},
+    collider = HC.rectangle(0,0,width,height),
     --circleCollider = {radius = 30},
     domain = {
       backup = {},
@@ -14,7 +14,10 @@ function (pos, vel)
         friction = {strength=100},
       }
     },
+    jetpackMovement = {speed=200},
+    input = Input{},
   }
+  spaceship.collider.entity = spaceship
   
   local children = {
     {
@@ -22,7 +25,7 @@ function (pos, vel)
       relative = Position{pos=Vector(-5,-5)},
       colour = {0,1,0},
       rect = {width=10, height=10},
-      rectangleCollider = {width=10,height=10},
+      collider = HC.rectangle(0,0,10,10),
       domainEntrance = {domain = spaceship},
     },
     
@@ -31,10 +34,14 @@ function (pos, vel)
       relative = Position{pos=Vector(-5,height-5)},
       colour = {0,1,1},
       rect = {width=10, height=10},
-      rectangleCollider = {width=10,height=10},
+      collider = HC.rectangle(0,0,10,10),
       domainExit = {domain = spaceship},
     },
   }
+  
+  for i = 1, #children do
+    children[i].collider.entity = children[i]
+  end
   
   return spaceship, children
 end

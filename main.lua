@@ -1,6 +1,9 @@
 Class = require "lib.inherit.composition".Class
 Vector = require "vector"
 Queue = require "lib.deque.deque".new
+
+HC = require "lib.HC"
+
 if arg[#arg] == "-debug" then require("mobdebug").start() end
 require "utils"
 
@@ -16,12 +19,19 @@ local templates = require "templates"
 
 function love.load()
   stars = {}
-  for i = 1, 200 do
-    stars[i] = Vector(love.math.random(1,love.graphics.getWidth()), love.math.random(1,love.graphics.getHeight()))
+  FUDGE = 200
+  for i = 1, 300 do
+    stars[i] = Vector(love.math.random(-FUDGE/2,love.graphics.getWidth()+FUDGE/2), love.math.random(-FUDGE/2,love.graphics.getHeight()+FUDGE/2))
   end
   
   --spaceshipThread = love.thread.newThread("spaceship_thread.lua")
   --spaceshipThread:start(1) -- 1 spaceship per second
+  
+  FPSHeight = 50
+  FPSWidth = 100
+  
+  FPSCanvas = love.graphics.newCanvas(FPSWidth, FPSHeight)
+  sidx = 0
   
   world = World()
   
@@ -60,7 +70,7 @@ function love.load()
       rate = 0.005,
     },
     spawnRadius = {
-      outer = 10
+      outer = 10,
     },
 
   }
@@ -126,14 +136,14 @@ function love.load()
     return e
   end
   
-  cursor = {
-    position = Position({}),
-    followMouse = true,
-    spawn = function()
-      return firework_shell(Vector(0,-150), 8)
-    end,
-    spawnOnClick = true
-  }
+--  cursor = {
+--    position = Position({}),
+--    followMouse = true,
+--    spawn = function()
+--      return firework_shell(Vector(0,-150), 8)
+--    end,
+--    spawnOnClick = true
+--  }
   
 --   component templates are a good idea for default values like Vector()
   
@@ -161,17 +171,21 @@ function love.load()
     position = Position{pos=Vector(300,290)},
     colour = {1,0,0},
     dot = {radius=3},
-    circleCollider = {radius=4},
+    collider = HC.circle(0,0,3),
     physics = Physics{},
     jetpackMovement = {speed=200},
-    keyboardInput = {axes={a="left", d="right", s="down", w="up"}, e="interact"},
+    keyboardInput = {axes={a="left", d="right", s="down", w="up"}, e="interact", ["="]="zoom_in", ["-"]="zoom_out"},
     --followAI = {target = cursor},
     input = {direction = Vector()},
     camera = {zoom = 1},
     domainTraveller = true,
-
+    spawn = function(self)
+      return clone(flame)
+    end,
     --precisionTarget = {granularity = 1000}, -- uncomment to add world-shifting for precision errors
   }
+  
+  player.collider.entity = player
   
   campfire = {
     position = Position{},
@@ -295,12 +309,21 @@ function love.load()
     keyboardInput = {i="increaseVelocity", k="decreaseVelocity", j="decreaseWidth", l="increaseWidth", axes={}},
   }
   
-  world:addEntity(leftSpawner)
-  world:addEntity(rightSpawner)
-  world:addEntity(cursor)
-  --world:addEntity(spaceship)
-  --world:addEntity(campfire)
+  lanes = {
+    {Vector(0,300), Vector(1,0), 200, 50},
+    {Vector(0,400), Vector(1,0), 400, 50},
+    {Vector(0,500), Vector(1,0), 500, 100},
+    {Vector(0,600), Vector(1,0), 600, 300},
+  }
+  
+  for i = 1, #lanes do
+    local lane = lanes[i]
+    lanes[i] = templates.Lane(lane[1], lane[2], lane[3], lane[4], player)[1]
+    world:addEntity(lanes[i])
+  end
+  
   world:addEntity(player)
+  world:addEntity(cursor)
 end
 
 function love.update(dt)
@@ -317,19 +340,37 @@ function love.update(dt)
   world:process()
 end
 
+initialStarVel = Vector(-1000,0) 
+viewOffset = Vector()
+
+function sigmoid(x, mean,  k)
+  return 1 / (1 + math.exp(-k * (x - mean)))
+end
+
 function love.draw()
-  love.graphics.setColor(1,1,1)
-  viewOffset = -player.position.pos
+  
+  starVel = initialStarVel - player.physics.vel
+  viewOffset = viewOffset + starVel * deltaTime
+  local warpFactor = sigmoid(starVel:len(), initialStarVel:len() + 1000, 0.01)
+  
+  love.graphics.setColor(lerpColour(warpFactor, {1,1,1}, {0.35,0.36,1}))
+  
   for n = 1,3 do
     love.graphics.setPointSize(n)
     for i = n, #stars, 3  do
+      love.graphics.setPointSize(n)
+      love.graphics.setLineWidth(n)
       -- TODO: replace with points(unpack(stars)) and love.translate
       local star = stars[i]
-      local drawstar = star + viewOffset * (1/10) * n --(stardir * ELAPSED_TIME * n * STAR_SPEED)
+      local drawstar = star + viewOffset * (1/10) * n--(stardir * ELAPSED_TIME * n * STAR_SPEED)
 --      drawstar = drawstar + Vector(1,1) * n
-      drawstar.x = (drawstar.x % (love.graphics.getWidth() + 20)) - 20
-      drawstar.y = (drawstar.y % (love.graphics.getHeight() + 20)) - 20
+      FUDGE = 200
+      drawstar.x = (drawstar.x % (love.graphics.getWidth() + FUDGE)) - FUDGE / 2
+      drawstar.y = (drawstar.y % (love.graphics.getHeight() + FUDGE)) - FUDGE / 2
       
+      local tail = drawstar + starVel:normalized() * warpFactor * 30 * n -- 100 pixel max for the tail
+      
+      love.graphics.line(drawstar.x, drawstar.y, tail.x, tail.y)
       love.graphics.points(drawstar.x, drawstar.y)
     end
   end
@@ -343,10 +384,46 @@ function love.draw()
   world:addEvent(nil, "postDraw", {})
   world:process()
   
+  DEBUG = false
+  if DEBUG then
+  
+  -- from zorg @ discord
+  -- spectograph is a canvas the same size as the window
+  -- sidx is a column offset in the spectograph canvas
+  -- H is window height, W is window width
+
+  -- this in love.draw
+  love.graphics.setCanvas(FPSCanvas)
+  love.graphics.push('all')
+  --love.graphics.setScissor(0,0,1,FPSHeight) -- scroll mode
+  love.graphics.setScissor(sidx,0,1,FPSHeight) -- trace mode
+  love.graphics.clear(0,0,0,0)
+  love.graphics.pop()
+
+  -- draw 1 column of data
+  love.graphics.setColor(1,0,0)
+  local fps = (1/deltaTime)
+  local yPos = FPSHeight * (fps/70)
+  love.graphics.rectangle("fill", sidx, FPSHeight - yPos, 1, FPSHeight)
+
+  sidx = (sidx + 1) % (FPSWidth)
+  love.graphics.setCanvas()
+  love.graphics.setColor(1,1,1,1)
+  love.graphics.setScissor(0,0,FPSWidth,FPSHeight)
+  love.graphics.draw(FPSCanvas, FPSWidth-sidx, 0) -- scroll mode
+  love.graphics.draw(FPSCanvas, 0-sidx, 0) -- (^ takes two draw calls)
+  love.graphics.setScissor()
+  --love.graphics.draw(FPSCanvas, 0, 0) -- trace mode
+  
   love.graphics.setColor(1,1,1)
-  love.graphics.print(tostring(1/deltaTime).." fps")
-  love.graphics.print("processing "..tostring(#world.entities).." entities", 0,20)
-  love.graphics.print("player.vel="..tostring(player.physics.vel),0,30)
+  love.graphics.print(tostring(1/deltaTime).." fps", FPSWidth)
+  love.graphics.print("processing "..tostring(#world.entities).." entities", FPSWidth,20)
+  love.graphics.print("player.vel="..tostring(player.physics.vel)..", player.pos="..tostring(player.position.pos),FPSWidth,30)
+  for i = 1, #lanes do
+    love.graphics.print("lanes["..i.."]..pos="..tostring(lanes[i].position.pos), FPSWidth, 10*i + 30)
+  end
+  
+  end
 end
 
 function love.mousemoved(x,y)

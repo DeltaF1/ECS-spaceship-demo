@@ -9,18 +9,29 @@ function World:init()
 end
 
 function World:addSystem(system)
-  system.world = self
   self.systems[#self.systems+1] = system
 end
 
 function World:processEvent(entity, eventName, eventArgs)
   for i = 1, #self.systems do
     local system = self.systems[i]
-    local funcName = "on"..(eventName:gsub("^%l", string.upper))
-    if system[funcName] then
-      local continue = system:callFunc(funcName, entity, eventArgs)
-      if continue == false then
-        break
+    local func = system["on"..(eventName:gsub("^%l", string.upper))]
+    if func then
+      if entity and system:filter(entity) then        
+        local continue = func(system, entity, eventArgs)
+        if continue == false then
+          break
+        end
+      elseif entity == nil then
+        -- global event
+        -- apply to all entities
+        -- This should eventually be moved inside system for caching
+        for i = 1, #self.entities do
+          local entity = self.entities[i]
+          if system:filter(entity) then
+            func(system, entity, eventArgs)
+          end
+        end
       end
     end
   end
@@ -77,6 +88,12 @@ end
 
 function World:removeEntity(e)
   self._toremove[e] = true
+  
+  
+  -- FIXME: Add onRemove callback
+  if e.collider then
+    HC.remove(e.collider)
+  end
   
   -- stop it being processed
   for k,v in pairs(e) do

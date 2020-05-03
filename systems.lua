@@ -33,6 +33,7 @@ function VelocitySystem:onUpdate(entity, eventArgs)
     position = entity.position
     physics = entity.physics
   end
+  physics = entity.physics
   position.pos = position.pos + physics.vel * dt
 end
 
@@ -44,8 +45,14 @@ end
 
 RelativeVelocity = s{"attached", "physics"}
 
-function RelativeVelocity:onUpdate(entity)
-  entity.physics.vel = entity.attached.parent.physics.vel + entity.attached.relativePhysics.vel
+--function RelativeVelocity:onUpdate(entity)
+--  entity.physics.vel = entity.attached.parent.physics.vel + entity.attached.relativePhysics.vel
+--end
+
+ColliderMover = s{"position", "collider"}
+
+function ColliderMover:onUpdate(entity, eventArgs)
+  entity.collider:moveTo(entity.position.pos:unpack())
 end
 
 Friction = s{"physics", "friction"}
@@ -68,27 +75,40 @@ end
 
 SpawnSystem = s{"spawn"}
 
-
 function SpawnSystem:onSpawn(entity, eventArgs)
-  
-  if eventArgs.e then return true end
+  if eventArgs.e then return false end
   -- spawn is a method that returns an entity
   -- FIXME: This mixes components and behaviour
   local toSpawn = {entity:spawn()}
-  for i = 1, #toSpawn do
-    local e = toSpawn[i]
+  
+  for i = 2, #toSpawn do
+    local child = toSpawn[i]
     
     -- For future onSpawn handlers
     local args = clone(eventArgs)
-    args.e = e
-    
-    world:addEntity(e)
-    world:addEvent(entity, "spawn", args)
-    world:addEvent(e, "created", {by=entity})
-    world:addEvent(e, "update", {dt=0})
-    
+    args.e = child
+
+      args.pos = child.position.pos
+
+    world:addEntity(child)
+    --world:addEvent(entity, "spawn", args)
+    world:addEvent(child, "created", {by=entity})
+    world:addEvent(child, "update", {dt=0})
   end
-  return false
+  
+  local parent = toSpawn[1]
+  
+  
+  local args = (eventArgs)
+  assert(parent ~= nil)
+  args.e = parent
+  if not args.pos then
+    args.pos = parent.position.pos
+  end
+  world:addEntity(parent)
+  world:addEvent(entity, "spawn", args)
+  world:addEvent(parent, "created", {by=entity})
+  world:addEvent(parent, "update", {dt=0})
 end
 
 SpawnRelativeSystem = s{"spawn", "position"}
@@ -98,8 +118,7 @@ function SpawnRelativeSystem:filter(entity)
 end
 
 function SpawnRelativeSystem:onSpawn(entity, eventArgs)
-  local e = eventArgs.e
-  e.position.pos = entity.position.pos + e.position.pos
+  eventArgs.pos = entity.position.pos + eventArgs.pos
 end
 
 SpawnOnClick = s{"spawn", "spawnOnClick"}
@@ -139,8 +158,7 @@ function SpawnRadius:onSpawn(entity, eventArgs)
   
   local offset = Vector.randomDirection(inner, outer)
   
-  local spawned = eventArgs.e
-  spawned.position.pos  = spawned.position.pos + offset
+  eventArgs.pos  = eventArgs.pos + offset
 end
 
 RectSystem = s{"rect", "position"}
@@ -380,10 +398,21 @@ function CameraSystem:onPostDraw(entity)
   love.graphics.pop()
 end
 
+function CameraSystem:onInput(entity, eventArgs)
+  local inputName = eventArgs.inputName
+  local camera = entity.camera
+  
+  if inputName == "zoom_in" then
+    camera.zoom = camera.zoom + 0.2
+  elseif inputName == "zoom_out" then
+    camera.zoom = camera.zoom - 0.2
+  end
+end
+
 FollowMouseSystem = s{"followMouse"}
 
 function FollowMouseSystem:onMousemoved(entity, eventArgs)
-  entity.position.pos = Vector(CameraSystem.transform:transformPoint(eventArgs.pos:unpack()))
+  entity.position.pos = eventArgs.pos --(CameraSystem.transform:transformPoint(eventArgs.pos:unpack()))
 end
 
 DomainSystem = s{"position", "domain"}
@@ -425,14 +454,14 @@ VelocityTransferSystem = s{"position", "physics", "domain"}
 function VelocityTransferSystem:onEnterDomain(entity, eventArgs)
   local e = eventArgs.entering
   if e.physics then
-    e.attached.relativePhysics.vel = e.physics.vel - entity.physics.vel
+    e.physics.vel = e.physics.vel - entity.physics.vel
   end
 end
 
 function VelocityTransferSystem:onExitDomain(entity, eventArgs)
   local e = eventArgs.exiting
   if e.physics then
-    e.physics.vel = e.attached.relativePhysics.vel + entity.physics.vel
+    e.physics.vel = e.physics.vel + entity.physics.vel
   end
 end
 
@@ -489,7 +518,6 @@ InteractFireEvent = s{"interactFireEvent"}
 
 function InteractFireEvent:onInteract(entity, eventArgs)
   local interactFireEvent = entity.interactFireEvent
-  
   world:addEvent(entity, interactFireEvent.eventName, eventArgs)
 end
 
@@ -499,8 +527,8 @@ function InteractsSystem:onInput(entity, eventArgs)
   local inputName = eventArgs.inputName
   
   if inputName == "interact" then
-    for colliding, _ in pairs(entity.collidingWith) do
-      world:addEvent(colliding, "interact", {from=entity})
+    for collider, delta in pairs(entity.collidingWith) do
+      world:addEvent(collider.entity, "interact", {from=entity})
     end
   end
 end
@@ -511,13 +539,7 @@ function PopupText:onDraw()
   love.graphics.text()
 end
 
-CollisionSystem = s{"position"}
-
--- FIXME: Replace with tiny.filter
-function CollisionSystem:filter(entity)
-  return entity.position and
-  (entity.circleCollider or entity.rectangleCollider or entity.polygonCollider or entity.compositeCollider)
-end
+CollisionSystem = s{"position", "collider"}
 
 -- This whole thing should be scrapped for different systems for 
 -- different collider types
@@ -552,34 +574,26 @@ function collides(entity1, entity2)
   end
 end
 
--- This should use a Quadtree
 function CollisionSystem:onUpdate(entity, eventArgs)
+  -- TODO: replace with Collider.dep = "CollidingWith"
   if not entity.collidingWith then entity.collidingWith = {} end
-  local collidingWith = entity.collidingWith
+  local oldCollidingWith = entity.collidingWith
   
-  for i = 1, #world.entities do
-    local other = world.entities[i]
-    
-    if other ~=entity and self:filter(other) then
-      if collides(entity, other) then
-        if not collidingWith[other] then
-          world:addEvent(entity, "collision", {collider=other})
-          collidingWith[other] = true
-        end
-      elseif collidingWith[other] then
-        world:addEvent(entity, "collisionEnded", {collider=other})
-        collidingWith[other] = nil
-      end
+  local newCollidingWith = HC.collisions(entity.collider)
+  
+  for other, delta in pairs(newCollidingWith) do
+    if not oldCollidingWith[other] then
+      world:addEvent(entity, "collision", {collider=other.entity})
     end
   end
-end
-
-DebugDespawner = s{"position"}
-
-function DebugDespawner:onUpdate(entity)
-  if math.abs(entity.position.pos.x - player.position.pos.x) > 10000 then
-    world:addEvent(entity, "kill")
+  
+  for other, delta in pairs(oldCollidingWith) do
+    if not newCollidingWith[other] then
+      world:addEvent(entity, "collisionEnded", {collider=other.entity})
+    end
   end
+  
+  entity.collidingWith = newCollidingWith
 end
 
 streamSpawner = {
@@ -628,8 +642,8 @@ CleanupAttached = s{}
 function CleanupAttached:onKill(entity)
   for i = 1, #world.entities do
     local e = world.entities[i]
-    
     if e.attached and e.attached.parent == entity then
+      assert(not e.lineSpawner)
       world:addEvent(e, "kill")
     end
   end
@@ -645,4 +659,169 @@ function DebugLogCollisions:onCollisionEnded(entity, eventArgs)
   print("collisionEnded")
 end
 
-return {CameraSystem, DetachSystem, AccelerationSystem, InputSystem, KeyboardInputSystem, FollowAI, JetpackMovement, VelocitySystem, RelativeVelocity, AttachedSystem, CollisionSystem, Friction, Speeen, Fade, Triangle, RectSystem, DotSystem, MultiplySpawn, SpawnSystem, AttachOnSpawn, SpawnRelativeSystem, SpawnOnClick, SpawnRadius, RelativeStreamSpawner, StreamSpawner, TimedSpawnSystem, DelayedSpawnSystem, FollowMouseSystem, TimedDeathSystem, DieOnSpawn, Death, PrecisionTarget, PrecisionCenteringSystem, InteractsSystem, InteractFireEvent, DomainSystem, DomainColliderSystem, VelocityTransferSystem, DomainTraveller, DomainEntranceSystem, DomainExitSystem, DebugLogCollisions, DebugDespawner, CleanupAttached, StreamSpawnerController}
+LineSpawnerSystem = s{"lineSpawner", "spawn", "position"}
+
+SPAWN_DIST = 1000
+DESPAWN_DIST = 5000
+
+-- https://stackoverflow.com/a/51906100
+function nearestPointToLine(origin, direction, point)
+  local lhs = point - origin
+  
+  local dot = lhs * direction
+  return origin + (direction * dot)
+end
+
+-- TODO: Can probably just sort over the entire swarm to find right and left? Then can boid it up
+
+function LineSpawnerSystem:onUpdate(entity)
+  -- The entity that we're tracking
+  local target = entity.lineSpawner.target
+  local swarm = entity.lineSpawner.swarm
+  local avgDist = entity.lineSpawner.avgDist
+  local line = entity.lineSpawner.line
+
+  local leftmost = swarm:peek_left()
+  local rightmost = swarm:peek_right()
+  
+  local closest = nearestPointToLine(entity.position.pos, line.dir, target.position.pos)
+  
+  if not leftmost then
+    leftmost = closest
+  else leftmost = leftmost.position.pos end
+  
+  if not rightmost then
+    rightmost = closest
+  else rightmost = rightmost.position.pos end
+  
+  -- SPAWN ITERATIONS
+  while (leftmost - closest):len() < SPAWN_DIST do
+    local dist = (leftmost - closest) * line.dir
+    local offset = (dist - avgDist) * line.dir
+    local newPos = closest + offset
+    world:addEvent(entity, "spawn", {pos=newPos, push="left"})
+    leftmost = newPos
+  end
+  
+  while (rightmost - closest):len() < SPAWN_DIST do
+    local dist = (rightmost - closest) * line.dir
+    local offset = (dist + avgDist) * line.dir
+    local newPos = closest + offset
+    world:addEvent(entity, "spawn", {pos=newPos, push="right"})
+    rightmost = newPos
+  end
+  
+  -- DESPAWN ITERATIONS
+  
+  while (leftmost - closest):len() > DESPAWN_DIST do
+    local toKill = swarm:pop_left()
+    if toKill then
+      assert(not toKill.lineSpawner)
+      world:addEvent(toKill, "kill")
+    end
+    leftmost = swarm:peek_left()
+    leftmost = leftmost and leftmost.position.pos or closest
+    assert(leftmost.x < rightmost.x)
+  end
+  
+  while (rightmost - closest):len() > DESPAWN_DIST do
+    local toKill = swarm:pop_right()
+    if toKill then
+      assert(not toKill.lineSpawner)
+      world:addEvent(toKill, "kill")
+    end
+    rightmost = swarm:peek_right()
+    if rightmost and not rightmost.position then
+      tprint(rightmost)
+    end
+    rightmost = rightmost and rightmost.position.pos or closest
+    assert(rightmost.x > leftmost.x)
+  end
+end
+
+-- kinda hacky but idk how else to do it in this event-based system
+function LineSpawnerSystem:onSpawn(entity, eventArgs)
+  if eventArgs.push then
+    local swarm = entity.lineSpawner.swarm
+    local e = eventArgs.e
+    swarm["push_"..eventArgs.push](swarm, e)
+    
+    if eventArgs.push == "right" then
+      e.swarm = {
+        swarm = swarm,
+        index = swarm.tail,
+      }
+    else
+      e.swarm = {
+        swarm = swarm,
+        index = swarm.head,
+      }
+    end
+  end
+end
+
+function LineSpawnerSystem:onDraw(entity)
+  local line = entity.lineSpawner.line
+  local target = entity.lineSpawner.target
+  local closest = nearestPointToLine(entity.position.pos, line.dir, target.position.pos)
+  
+  love.graphics.setColor(0,1,0)
+  love.graphics.points(closest.x, closest.y)
+end
+
+SpawnAt = s{"spawn"}
+
+function SpawnAt:onSpawn(entity, eventArgs)
+  if eventArgs.pos then
+    eventArgs.e.position.pos = eventArgs.pos
+  end
+end
+
+-- TODO: Rename "swarm" component?
+LineBoid = s{"swarm", "boid", "input"}
+
+function LineBoid:onUpdate(entity, eventArgs)
+  local swarm = entity.swarm
+  local boid = entity.boid
+  local steer = Vector()
+  for i = swarm.index - 2, swarm.index + 2 do
+    local neighbour = swarm.swarm[swarm.index]
+    
+    if neighbour then
+      local delta = entity.position.pos - neighbour.position.pos
+      
+      if delta:len() > boid.tooFar then
+        steer = steer + delta:normalized()
+      elseif delta:len() < boid.tooClose then
+        steer = steer - delta:normalized()
+      end
+    end
+  end
+  entity.input.direction = (entity.input.direction + steer):normalized()
+end
+
+CachedDrawingSystem = s{"canvas", "position"}
+
+function CachedDrawingSystem:onDraw(entity)
+  love.graphics.draw(entity.canvas, entity.position.pos)
+end
+
+ShipDrawingSystem = s{"shipLayers", "position"}
+
+function ShipDrawingSystem:onDraw(entity, eventArgs)
+  local shipLayers = entity.shipLayers
+  love.graphics.setColor(1,1,1)
+  
+  love.graphics.push()
+  love.graphics.translate(self.position.pos:unpack())
+  love.graphics.draw(shipLayers.greebleSpriteBatch)
+  
+  love.graphics.draw(shipLayers.hullSpriteBatch)
+  love.graphics.draw(shipLayers.roomChromeSpriteBatch)
+  love.graphics.draw(shipLayers.wallSpriteBatch)
+  love.graphics.draw(shipLayers.propSpriteBatch)
+  
+  love.graphics.pop()
+end
+
+return {CameraSystem, DetachSystem, AccelerationSystem, InputSystem, KeyboardInputSystem, FollowAI, LineBoid, JetpackMovement, VelocitySystem, RelativeVelocity, AttachedSystem, ColliderMover, CollisionSystem, Friction, Speeen, Fade, Triangle, RectSystem, DotSystem, MultiplySpawn, SpawnSystem, AttachOnSpawn, SpawnRelativeSystem, SpawnOnClick, SpawnRadius, RelativeStreamSpawner, StreamSpawner, LineSpawnerSystem, TimedSpawnSystem, DelayedSpawnSystem, SpawnAt, FollowMouseSystem, TimedDeathSystem, DieOnSpawn, Death, PrecisionTarget, PrecisionCenteringSystem, InteractsSystem, InteractFireEvent, DomainSystem, DomainColliderSystem, VelocityTransferSystem, DomainTraveller, DomainEntranceSystem, DomainExitSystem, DebugLogCollisions, CleanupAttached, StreamSpawnerController}

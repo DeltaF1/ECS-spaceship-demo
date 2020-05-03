@@ -9,7 +9,7 @@ TimedSpawn = c("timedSpawn", {timer = 0})
 Input = c("input", {direction = Vector()})
 Physics = c("physics", {vel = Vector(), accel = Vector()})
 Attached = c("attached", {relative=Position{}, relativePhysics=Physics{}})
-
+LineSpawner = c("lineSpawner", {swarm=Queue()})
 -- }
 
 -- return components
