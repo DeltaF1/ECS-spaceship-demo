@@ -1,3 +1,6 @@
 [submodule "lib/inherit"]
 	path = lib/inherit
 	url = https://github.com/deltaf1/lua-cominheritance
+[submodule "lib/HC"]
+	path = lib/HC
+	url = https://github.com/vrld/HC
