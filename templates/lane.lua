@@ -1,3 +1,4 @@
+local generate = require "generator.ship_generator".generate
 return Template(
 function(origin, direction, shipVelocity, avgDist, target)
   local lane = {
@@ -6,7 +7,8 @@ function(origin, direction, shipVelocity, avgDist, target)
     dot = {radius=2},
     spawn = function(self)
       vel = Vector(shipVelocity,0)
-      return unpack(templates.Spaceship(nil, vel))
+      local geometry = clone(PRE_GEN[love.math.random(#PRE_GEN)])
+      return unpack(templates.Spaceship(nil, vel, geometry))
     end,
     lineSpawner = LineSpawner{
       line = {dir=direction},

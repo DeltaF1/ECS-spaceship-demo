@@ -1,78 +1,103 @@
 local Vector = require "vector"
 
-local room_gen = require "room_gen"
-local geometry = require "geometry"
-
-local TileGrid = geometry.TileGrid
---local Geometry = geometry.GeometryView
+local room_gen = require "generator.room_gen"
+local TileGrid = require "lib.tile_geometry".TileGrid
+local TileSet = require "lib.tileset"
 
 local c = require "component".makeComponentClass
 local s = require "system".makeSystemClass
 
--- seed, generation type
-function Ship:init(seed)
-  List.init(self)
+local assetPrefix = "assets/ships/"
+
+local hullTileAtlas = love.graphics.newImage(assetPrefix.."tileset_inv.png")
+local wallTileAtlas = love.graphics.newImage(assetPrefix.."room_0px.png")
+local gridTileset = love.graphics.newImage(assetPrefix.."room_1px.png")
+local greebleAtlas = love.graphics.newImage(assetPrefix.."greebles.png")
+local propAtlas = love.graphics.newImage(assetPrefix.."props.png")
+ 
+local tilesetwidth,tilesetheight = hullTileAtlas:getDimensions()
+
+TILE_WIDTH=16
+
+tileset = TileSet(tilesetwidth, tilesetheight, TILE_WIDTH)
+ 
+local door_open = love.graphics.newImage(assetPrefix.."door_open.png")
+local door_closed = love.graphics.newImage(assetPrefix.."door_closed.png")
+
+local greebleQuads = {
+  love.graphics.newQuad(0,0,16,32,greebleAtlas:getDimensions()), --antenna array
+  love.graphics.newQuad(16,0,16,16,greebleAtlas:getDimensions()), --light box
+  -- coloured boxes
+  love.graphics.newQuad(16,16,8,8,greebleAtlas:getDimensions()),
+  love.graphics.newQuad(16,24,8,8,greebleAtlas:getDimensions()), 
+  love.graphics.newQuad(24,16,8,8,greebleAtlas:getDimensions()), 
+  love.graphics.newQuad(24,24,8,8,greebleAtlas:getDimensions()),
+  -- railings
+  love.graphics.newQuad(32,17,16,3,greebleAtlas:getDimensions()),
+  love.graphics.newQuad(32,20,16,3,greebleAtlas:getDimensions()),
+  love.graphics.newQuad(32,23,16,3,greebleAtlas:getDimensions()),
+  love.graphics.newQuad(32,26,16,3,greebleAtlas:getDimensions()),
+  love.graphics.newQuad(32,29,16,3,greebleAtlas:getDimensions()),
   
-  seed = seed or os.time()
-  
-  self.random = love.math.newRandomGenerator(seed)
+  love.graphics.newQuad(48,0,16,32,greebleAtlas:getDimensions()), -- antenna
+}
+
+local ShipLayerClass = c("shipLayers")
+
+local old_init = ShipLayerClass.init
+
+function ShipLayerClass:init()
   self.hullSpriteBatch = love.graphics.newSpriteBatch(hullTileAtlas, 100)
   self.wallSpriteBatch = love.graphics.newSpriteBatch(wallTileAtlas, 100)
   self.roomChromeSpriteBatch = love.graphics.newSpriteBatch(gridTileset, 100)
   self.greebleSpriteBatch = love.graphics.newSpriteBatch(greebleAtlas, 100)
   self.propSpriteBatch = love.graphics.newSpriteBatch(propAtlas, 100)
+  
+  old_init(self)
 end
 
-local ShipLayerClass = c("shipLayers")
+local ShipDrawingSystem = s{"shipLayers", "shipGeometry", "position"}
 
-function ShipLayers(tbl)
-  tbl.hullSpriteBatch = love.graphics.newSpriteBatch(hullTileAtlas, 100)
-  tbl.wallSpriteBatch = love.graphics.newSpriteBatch(wallTileAtlas, 100)
-  tbl.roomChromeSpriteBatch = love.graphics.newSpriteBatch(gridTileset, 100)
-  tbl.greebleSpriteBatch = love.graphics.newSpriteBatch(greebleAtlas, 100)
-  tbl.propSpriteBatch = love.graphics.newSpriteBatch(propAtlas, 100)
-  
-  ShipLayerClass:init(tbl)
-  
-  return setmetatable(tbl, ShipLayerClass)
-end
-
-local ShipLayerDrawingSystem = s{"shipLayers", "position"}
-
-function Ship:generateSpriteBatches()
+function ShipDrawingSystem:onRefreshSpriteBatches(entity)
+  local random = love.math.newRandomGenerator()
+  local shipLayers = entity.shipLayers
+  local shipGeometry = entity.shipGeometry
+  local rooms = shipGeometry.rooms
+  local doorMatrix = shipGeometry.doorMatrix
+  local shipTiles = shipGeometry.shipTiles
   -- Drawing to spritebatches
   ----------------------------
-  self.hullSpriteBatch:clear()
-  self.greebleSpriteBatch:clear()
-  self.roomChromeSpriteBatch:clear()
-  self.wallSpriteBatch:clear()
-  self.propSpriteBatch:clear()
+  shipLayers.hullSpriteBatch:clear()
+  shipLayers.greebleSpriteBatch:clear()
+  shipLayers.roomChromeSpriteBatch:clear()
+  shipLayers.wallSpriteBatch:clear()
+  shipLayers.propSpriteBatch:clear()
   
   -- Greebles
   -- TODO: Center greebles that are < TILE_WIDTH wide
   -- TODO: DRY
   -- Add an offset of 1 to generate hull sprites outside of the limits
-  local size = self.shipGeometry:size() + Vector(1,1)
+  local size = shipTiles:size() + Vector(1,1)
   local hullWidth = 2
   for x = 1,size.x+1 do
     for y = 1,size.y+1 do
-      if not self.shipGeometry:get(x,y) then
+      if not shipTiles:get(x,y) then
         --empty space for greebles
-        if self.random:random() > 0.2 then
-          local quad = greebleQuads[self.random:random(#greebleQuads)]
+        if random:random() > 0.2 then
+          local quad = greebleQuads[random:random(#greebleQuads)]
           local _,_,quadWidth,quadHeight = quad:getViewport()
-          if self.shipGeometry:get(x+1,y) then
+          if shipTiles:get(x+1,y) then
             -- Pointing left
-            self.greebleSpriteBatch:add(quad, (x-1)*TILE_WIDTH-(quadHeight-TILE_WIDTH)-hullWidth, (y-1)*TILE_WIDTH+quadWidth, -math.pi/2, 1, 1, 0, 0)
-          elseif self.shipGeometry:get(x-1,y) then
+            shipLayers.greebleSpriteBatch:add(quad, (x-1)*TILE_WIDTH-(quadHeight-TILE_WIDTH)-hullWidth, (y-1)*TILE_WIDTH+quadWidth, -math.pi/2, 1, 1, 0, 0)
+          elseif shipTiles:get(x-1,y) then
             -- Pointing right
-            self.greebleSpriteBatch:add(quad, (x-1)*TILE_WIDTH+quadHeight+hullWidth, (y-1)*TILE_WIDTH, math.pi/2, 1, 1, 0, 0)
-          elseif self.shipGeometry:get(x,y+1) then
+            shipLayers.greebleSpriteBatch:add(quad, (x-1)*TILE_WIDTH+quadHeight+hullWidth, (y-1)*TILE_WIDTH, math.pi/2, 1, 1, 0, 0)
+          elseif shipTiles:get(x,y+1) then
             -- Pointing up
-            self.greebleSpriteBatch:add(quad, (x-1)*TILE_WIDTH, (y-1)*TILE_WIDTH-(quadHeight-TILE_WIDTH)+hullWidth, 0, 1, 1, 0, 0)
-          elseif self.shipGeometry:get(x,y-1) then
+            shipLayers.greebleSpriteBatch:add(quad, (x-1)*TILE_WIDTH, (y-1)*TILE_WIDTH-(quadHeight-TILE_WIDTH)+hullWidth, 0, 1, 1, 0, 0)
+          elseif shipTiles:get(x,y-1) then
             -- Pointing down
-            self.greebleSpriteBatch:add(quad, (x-1)*TILE_WIDTH+quadWidth, (y-1)*TILE_WIDTH+quadHeight-hullWidth, math.pi, 1, 1, 0, 0)
+            shipLayers.greebleSpriteBatch:add(quad, (x-1)*TILE_WIDTH+quadWidth, (y-1)*TILE_WIDTH+quadHeight-hullWidth, math.pi, 1, 1, 0, 0)
           end
         end
       end
@@ -82,13 +107,12 @@ function Ship:generateSpriteBatches()
   -- Hull walls
   
   -- Make a geometry object that returns true for empty space
-  local shipGeometry = self.shipGeometry
   invGeometry = {
     get = function(self, x,y)
-      return not shipGeometry:get(x,y)
+      return not shipTiles:get(x,y)
     end
   }
-  setmetatable(invGeometry, {__index=shipGeometry})
+  setmetatable(invGeometry, {__index=shipTiles})
   
   floorQuad = love.graphics.newQuad(80,122,16,16,96,128)
   
@@ -97,18 +121,16 @@ function Ship:generateSpriteBatches()
       if invGeometry:get(x,y) then 
         local quad = tileset:getQuad(invGeometry,x,y)
         if quad then
-          self.hullSpriteBatch:add(quad, (x-1)*TILE_WIDTH, (y-1)*TILE_WIDTH)   
+          shipLayers.hullSpriteBatch:add(quad, (x-1)*TILE_WIDTH, (y-1)*TILE_WIDTH)   
         end
       else
         -- Generate the blank floor tiles
         local quad = floorQuad
-        self.hullSpriteBatch:add(quad, (x-1)*TILE_WIDTH, (y-1)*TILE_WIDTH)
+        shipLayers.hullSpriteBatch:add(quad, (x-1)*TILE_WIDTH, (y-1)*TILE_WIDTH)
       end
     end
   end
-  
-  local rooms = self.rooms
-  local adjmatrix = self.adjmatrix
+
   -- Rooms
   -- generate the "chrome" (room type highlights) and "walls" (the gray walls showing room boundaries
   for i = 1,#rooms do
@@ -119,7 +141,7 @@ function Ship:generateSpriteBatches()
       get = function(self, x, y)
         local pos = Vector.isvector(x) and x or Vector(x,y)
         for j = 1, #rooms do
-          door = adjmatrix[i][j]
+          door = doorMatrix[i][j]
           if door then
             local vec1 = door.vec1 - room.pos + Vector(1,1)
             if door.vec1.x == door.vec2.x then
@@ -133,18 +155,17 @@ function Ship:generateSpriteBatches()
       end
     }
     
-    local ship = self
     local makeDoorGeometry = function(oldTilePos)
       local doorGeometry = {
         get = function(self, x, y)
           local newTilePos = Vector.isvector(x) and x or Vector(x,y)
-          local otherRoomIndex = ship.shipGeometry:get(newTilePos + room.pos)
+          local otherRoomIndex = shipTiles:get(newTilePos + room.pos)
           
           assert(oldTilePos ~= newTilePos)
           
           
           for j = 1, #rooms do
-            local door = ship.adjmatrix[i][j]
+            local door = doorMatrix[i][j]
             
             if door then
               local doorPos = door.vec1:min(door.vec2) - room.pos + Vector(1,1)
@@ -197,16 +218,16 @@ function Ship:generateSpriteBatches()
     end
     
     if room then
-      self.roomChromeSpriteBatch:setColor(room.colour[1], room.colour[2], room.colour[3], 0.5)
-      self.wallSpriteBatch:setColor(0.3, 0.3, 0.3)
+      shipLayers.roomChromeSpriteBatch:setColor(room.colour[1], room.colour[2], room.colour[3], 0.5)
+      shipLayers.wallSpriteBatch:setColor(0.3, 0.3, 0.3)
       local size = room.geometry:size()
       for x = 1, size.x do
         for y = 1, size.y do
           if room.geometry:get(x,y) then 
             local quad = tileset:getQuad(makeDoorGeometry(Vector(x,y)),x,y)
             if quad then
-              self.roomChromeSpriteBatch:add(quad, (room.pos.x+x-1)*TILE_WIDTH, (room.pos.y+y-1)*TILE_WIDTH)
-              self.wallSpriteBatch:add(quad, (room.pos.x+x-1)*TILE_WIDTH, (room.pos.y+y-1)*TILE_WIDTH)
+              shipLayers.roomChromeSpriteBatch:add(quad, (room.pos.x+x-1)*TILE_WIDTH, (room.pos.y+y-1)*TILE_WIDTH)
+              shipLayers.wallSpriteBatch:add(quad, (room.pos.x+x-1)*TILE_WIDTH, (room.pos.y+y-1)*TILE_WIDTH)
             end
           end
         end
@@ -233,25 +254,34 @@ function Ship:generateSpriteBatches()
       
       position = position + prop.offset
       
-      self.propSpriteBatch:add(prop.quad, position.x, position.y, prop.angle, 1, 1)
+      shipLayers.propSpriteBatch:add(prop.quad, position.x, position.y, prop.angle, 1, 1)
     end
   end
 end
 
-function Ship:draw()
+function ShipDrawingSystem:onDraw(entity)
+  local pos = entity.position.pos
+  local shipLayers = entity.shipLayers
+  local shipGeometry = entity.shipGeometry
+  
+  local rooms = shipGeometry.rooms
+  local doorMatrix = shipGeometry.doorMatrix
+  
+  love.graphics.push()
+  love.graphics.translate(pos.x, pos.y)
   love.graphics.setColor(1,1,1)
   
-  love.graphics.draw(self.greebleSpriteBatch)
+  love.graphics.draw(shipLayers.greebleSpriteBatch)
   
-  love.graphics.draw(self.hullSpriteBatch)
-  love.graphics.draw(self.roomChromeSpriteBatch)
-  love.graphics.draw(self.wallSpriteBatch)
-  love.graphics.draw(self.propSpriteBatch)
+  love.graphics.draw(shipLayers.hullSpriteBatch)
+  love.graphics.draw(shipLayers.roomChromeSpriteBatch)
+  love.graphics.draw(shipLayers.wallSpriteBatch)
+  love.graphics.draw(shipLayers.propSpriteBatch)
   
   love.graphics.setColor(1,1,1)
-  for i = 1, #self.rooms do
-    for j = i, #self.rooms do
-      local door = self.adjmatrix[i][j]
+  for i = 1, #rooms do
+    for j = i, #rooms do
+      local door = doorMatrix[i][j]
       if door then
         local vec1, vec2 = door.vec1, door.vec2
         local upperLeft = vec1:min(vec2)
@@ -269,7 +299,10 @@ function Ship:draw()
       end
     end
   end
-  
+  love.graphics.pop()
+end
+
+function DEBUGDrawing(self)
   if DEBUG.rect_bounds then
     love.graphics.setColor(1,0,0)
     for i = 1,#self.rects do
@@ -297,98 +330,5 @@ function Ship:draw()
   end
 end
 
-local function centerRooms(rooms)
-  -- Update room positions to be relative to the new bounding box
-  local tl,br
 
-  for i = 1,#rooms do
-    if rooms[i] then
-      local current = rooms[i].pos
-      if tl then
-        if current.x < tl.x then
-          tl.x = current.x
-        end
-        if current.y < tl.y then
-          tl.y = current.y
-        end
-      else
-        tl = current:clone()
-      end
-      if br then
-        if current.x + rooms[i].size.x > br.x then
-          br.x = current.x + rooms[i].size.x 
-        end
-        
-        if current.y + rooms[i].size.y > br.y then
-          br.y = current.y + rooms[i].size.y
-        end
-      else
-        br = current + rooms[i].size
-      end
-    end
-  end
-  
-  local center = (br-tl)/2
-  
-  tl = tl - Vector(1,1)
-  
-  -- Offset rooms so that they are relative to the top left
-  for i = 1, #rooms do
-    rooms[i].pos = rooms[i].pos - tl
-  end
-  
-  return center
-end
-
-function Ship:checkMove(oldPos, newPos)
-  local oldTilePos = (oldPos/TILE_WIDTH):floor() + Vector(1,1)
-  local newTilePos = (newPos/TILE_WIDTH):floor() + Vector(1,1)
-  
-  if self.shipGeometry:get(newTilePos) then
-    return newPos
-  end
-  
-  return oldPos
-end
-
-function Ship:generate(seed)
-  self.rooms = genRoomsBy4DTetris(self.random)
-  
-  self.center = centerRooms(self.rooms)
-  
-  -- Calculate adjacency matrix for all the rooms
-  self.adjmatrix, to_merge = roomAdjacency(self.rooms, self.random)
-  
-  -- FIXME: For debugging
-  self.rects = {}
-  
-  for i = 1, #self.rooms do
-    self.rects[#self.rects+1] = {self.rooms[i].pos:clone(), self.rooms[i].size:clone()}
-  end
-  
-  -- NOW LEAVING THE GRID
-  --
-  -- Combine rooms that are adjacent and of the same type
-  mergeRooms(self.rooms, to_merge, self.adjmatrix)
-  
-  -- Store the geometry of the spaceship as a whole
-  --
-  -- Useful for hull generation, as well as a fast lookup for room collision detection
-  self.shipGeometry = TileGrid:new()
-  
-  for id, room in ipairs(self.rooms) do
-    local size = room.geometry:size()
-    for x = 1, size.x do
-      for y = 1, size.y do
-        if room.geometry:get(x, y) then
-          self.shipGeometry:set(x+room.pos.x, y+room.pos.y, id)
-        end
-      end
-    end
-  end
-
-  self:generateSpriteBatches()
-end
-
-
-return {Ship = Ship}
+return {ShipDrawingSystem=ShipDrawingSystem, ShipLayerClass=ShipLayerClass}

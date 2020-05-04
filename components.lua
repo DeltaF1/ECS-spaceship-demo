@@ -11,5 +11,6 @@ Physics = c("physics", {vel = Vector(), accel = Vector()})
 Attached = c("attached", {relative=Position{}, relativePhysics=Physics{}})
 LineSpawner = c("lineSpawner", {swarm=Queue()})
 -- }
+ShipLayerClass = require "ship_drawing".ShipLayerClass
 
 -- return components

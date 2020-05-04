@@ -13,15 +13,24 @@ Entity = require "entity"
 require "system"
 require "component"
 
+love.graphics.setDefaultFilter("nearest", "nearest")
+
 require "components"
 local systems = require "systems"
 local templates = require "templates"
+
+local generate = require "generator.ship_generator".generate
 
 function love.load()
   stars = {}
   FUDGE = 200
   for i = 1, 300 do
     stars[i] = Vector(love.math.random(-FUDGE/2,love.graphics.getWidth()+FUDGE/2), love.math.random(-FUDGE/2,love.graphics.getHeight()+FUDGE/2))
+  end
+  
+  PRE_GEN = {}
+  for i = 1, 20 do
+    PRE_GEN[i] = generate(i)
   end
   
   --spaceshipThread = love.thread.newThread("spaceship_thread.lua")
@@ -310,14 +319,16 @@ function love.load()
   }
   
   lanes = {
-    {Vector(0,300), Vector(1,0), 200, 50},
-    {Vector(0,400), Vector(1,0), 400, 50},
-    {Vector(0,500), Vector(1,0), 500, 100},
-    {Vector(0,600), Vector(1,0), 600, 300},
+  -- pos,           dir,        speed, dist
+    {Vector(0,-100), Vector(1,0), 200, 200},
+    {Vector(0,300), Vector(1,0), 400, 200},
+    {Vector(0,600), Vector(1,0), 500, 1000},
+    {Vector(0,1000), Vector(1,0), 1200, 200},
   }
   
   for i = 1, #lanes do
     local lane = lanes[i]
+    
     lanes[i] = templates.Lane(lane[1], lane[2], lane[3], lane[4], player)[1]
     world:addEntity(lanes[i])
   end
@@ -384,7 +395,7 @@ function love.draw()
   world:addEvent(nil, "postDraw", {})
   world:process()
   
-  DEBUG = false
+  DEBUG = true
   if DEBUG then
   
   -- from zorg @ discord
@@ -419,8 +430,8 @@ function love.draw()
   love.graphics.print(tostring(1/deltaTime).." fps", FPSWidth)
   love.graphics.print("processing "..tostring(#world.entities).." entities", FPSWidth,20)
   love.graphics.print("player.vel="..tostring(player.physics.vel)..", player.pos="..tostring(player.position.pos),FPSWidth,30)
-  for i = 1, #lanes do
-    love.graphics.print("lanes["..i.."]..pos="..tostring(lanes[i].position.pos), FPSWidth, 10*i + 30)
+  if player.attached then
+    love.graphics.print("player.relativeVelocity="..tostring(player.attached.relativePhysics.vel),FPSWidth,40)
   end
   
   end

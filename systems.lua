@@ -33,7 +33,6 @@ function VelocitySystem:onUpdate(entity, eventArgs)
     position = entity.position
     physics = entity.physics
   end
-  physics = entity.physics
   position.pos = position.pos + physics.vel * dt
 end
 
@@ -45,9 +44,17 @@ end
 
 RelativeVelocity = s{"attached", "physics"}
 
---function RelativeVelocity:onUpdate(entity)
---  entity.physics.vel = entity.attached.parent.physics.vel + entity.attached.relativePhysics.vel
---end
+function RelativeVelocity:onUpdate(entity)
+  entity.physics.vel = entity.attached.parent.physics.vel + entity.attached.relativePhysics.vel
+end
+
+function setVelocity(entity, velocity)
+  if entity.attached then
+    entity.attached.relativePhysics.vel = velocity - entity.attached.parent.physics.vel
+  else
+    entity.physics.vel = velocity
+  end
+end
 
 ColliderMover = s{"position", "collider"}
 
@@ -61,8 +68,8 @@ function Friction:onUpdate(entity, eventArgs)
   local dt = eventArgs.dt
   local physics = entity.physics
   local friction = entity.friction
-  
-  physics.vel = physics.vel - (physics.vel:normalized() * math.min(physics.vel:len(), friction.strength*dt))
+  if entity.attached then physics = entity.attached.relativePhysics end
+  physics.vel = physics.vel * math.min(1, math.max(0, 1 - (friction.strength * dt)))
 end
 
 DotSystem = s{"dot", "position"}
@@ -93,7 +100,6 @@ function SpawnSystem:onSpawn(entity, eventArgs)
     world:addEntity(child)
     --world:addEvent(entity, "spawn", args)
     world:addEvent(child, "created", {by=entity})
-    world:addEvent(child, "update", {dt=0})
   end
   
   local parent = toSpawn[1]
@@ -108,7 +114,6 @@ function SpawnSystem:onSpawn(entity, eventArgs)
   world:addEntity(parent)
   world:addEvent(entity, "spawn", args)
   world:addEvent(parent, "created", {by=entity})
-  world:addEvent(parent, "update", {dt=0})
 end
 
 SpawnRelativeSystem = s{"spawn", "position"}
@@ -324,7 +329,7 @@ JetpackMovement = s{"jetpackMovement", "physics", "input"}
 
 function JetpackMovement:onUpdate(entity, eventArgs)
   local jp = entity.jetpackMovement
-  entity.physics.vel = entity.physics.vel + (entity.input.direction:normalized() * eventArgs.dt * jp.speed)
+  setVelocity(entity, entity.physics.vel + (entity.input.direction:normalized() * eventArgs.dt * jp.speed))
 end
 
 FollowAI = s{"position", "input", "followAI"}
@@ -345,7 +350,7 @@ function DetachSystem:onDetach(entity, eventArgs)
   local attached = entity.attached
   local parent = attached.parent
   if physics and attached.parent.physics then
-    physics.vel = physics.vel + attached.parent.physics.vel
+    physics.vel = entity.attached.relativePhysics.vel + attached.parent.physics.vel
   end
   entity.position.pos = attached.parent.position.pos + attached.relative.pos
   entity.attached = nil
@@ -454,14 +459,14 @@ VelocityTransferSystem = s{"position", "physics", "domain"}
 function VelocityTransferSystem:onEnterDomain(entity, eventArgs)
   local e = eventArgs.entering
   if e.physics then
-    e.physics.vel = e.physics.vel - entity.physics.vel
+    setVelocity(e, e.physics.vel)
   end
 end
 
 function VelocityTransferSystem:onExitDomain(entity, eventArgs)
   local e = eventArgs.exiting
   if e.physics then
-    e.physics.vel = e.physics.vel + entity.physics.vel
+    e.physics.vel = entity.physics.vel
   end
 end
 
@@ -662,7 +667,7 @@ end
 LineSpawnerSystem = s{"lineSpawner", "spawn", "position"}
 
 SPAWN_DIST = 1000
-DESPAWN_DIST = 5000
+DESPAWN_DIST = 2000
 
 -- https://stackoverflow.com/a/51906100
 function nearestPointToLine(origin, direction, point)
@@ -721,7 +726,7 @@ function LineSpawnerSystem:onUpdate(entity)
     end
     leftmost = swarm:peek_left()
     leftmost = leftmost and leftmost.position.pos or closest
-    assert(leftmost.x < rightmost.x)
+    assert(leftmost.x <= rightmost.x)
   end
   
   while (rightmost - closest):len() > DESPAWN_DIST do
@@ -735,7 +740,7 @@ function LineSpawnerSystem:onUpdate(entity)
       tprint(rightmost)
     end
     rightmost = rightmost and rightmost.position.pos or closest
-    assert(rightmost.x > leftmost.x)
+    assert(rightmost.x >= leftmost.x)
   end
 end
 
@@ -760,14 +765,14 @@ function LineSpawnerSystem:onSpawn(entity, eventArgs)
   end
 end
 
-function LineSpawnerSystem:onDraw(entity)
-  local line = entity.lineSpawner.line
-  local target = entity.lineSpawner.target
-  local closest = nearestPointToLine(entity.position.pos, line.dir, target.position.pos)
+--function LineSpawnerSystem:onDraw(entity)
+--  local line = entity.lineSpawner.line
+--  local target = entity.lineSpawner.target
+--  local closest = nearestPointToLine(entity.position.pos, line.dir, target.position.pos)
   
-  love.graphics.setColor(0,1,0)
-  love.graphics.points(closest.x, closest.y)
-end
+--  love.graphics.setColor(0,1,0)
+--  love.graphics.points(closest.x, closest.y)
+--end
 
 SpawnAt = s{"spawn"}
 
@@ -824,4 +829,4 @@ function ShipDrawingSystem:onDraw(entity, eventArgs)
   love.graphics.pop()
 end
 
-return {CameraSystem, DetachSystem, AccelerationSystem, InputSystem, KeyboardInputSystem, FollowAI, LineBoid, JetpackMovement, VelocitySystem, RelativeVelocity, AttachedSystem, ColliderMover, CollisionSystem, Friction, Speeen, Fade, Triangle, RectSystem, DotSystem, MultiplySpawn, SpawnSystem, AttachOnSpawn, SpawnRelativeSystem, SpawnOnClick, SpawnRadius, RelativeStreamSpawner, StreamSpawner, LineSpawnerSystem, TimedSpawnSystem, DelayedSpawnSystem, SpawnAt, FollowMouseSystem, TimedDeathSystem, DieOnSpawn, Death, PrecisionTarget, PrecisionCenteringSystem, InteractsSystem, InteractFireEvent, DomainSystem, DomainColliderSystem, VelocityTransferSystem, DomainTraveller, DomainEntranceSystem, DomainExitSystem, DebugLogCollisions, CleanupAttached, StreamSpawnerController}
+return {CameraSystem, DetachSystem, AccelerationSystem, InputSystem, KeyboardInputSystem, FollowAI, LineBoid, JetpackMovement, Friction, VelocitySystem, RelativeVelocity, AttachedSystem, ColliderMover, CollisionSystem, Speeen, Fade, Triangle, RectSystem, DotSystem, MultiplySpawn, SpawnSystem, AttachOnSpawn, SpawnRelativeSystem, SpawnOnClick, SpawnRadius, RelativeStreamSpawner, StreamSpawner, LineSpawnerSystem, TimedSpawnSystem, DelayedSpawnSystem, SpawnAt, FollowMouseSystem, TimedDeathSystem, DieOnSpawn, Death, PrecisionTarget, PrecisionCenteringSystem, InteractsSystem, InteractFireEvent, DomainSystem, DomainColliderSystem, DomainTraveller, DomainEntranceSystem, DomainExitSystem, VelocityTransferSystem, DebugLogCollisions, CleanupAttached, StreamSpawnerController, require "ship_drawing".ShipDrawingSystem}

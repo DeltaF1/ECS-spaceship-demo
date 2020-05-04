@@ -15,7 +15,7 @@ end
 function makeComponentClass(name, defaults, tbl)
   local class = Class(tbl, {Component})
   class._name = name
-  class._defaults = defaults
+  class._defaults = defaults or {}
   
   return class
 end

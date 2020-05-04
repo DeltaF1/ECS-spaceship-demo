@@ -1,23 +1,25 @@
 return Template(
-function (pos, vel)
+function (pos, vel, geometry)
   local width,height = love.math.random(25,35), love.math.random(20,50)
   local spaceship = {
     position = Position{pos=pos},
     physics = Physics{vel=vel},
-    colour = {love.math.random(), love.math.random(), 0.5},
-    rect = {width=width, height=height},
-    collider = HC.rectangle(0,0,width,height),
+    --collider = HC.rectangle(0,0,width,height),
     --circleCollider = {radius = 30},
     domain = {
       backup = {},
       components = {
-        friction = {strength=100},
+        friction = {strength=4},
       }
     },
     jetpackMovement = {speed=200},
     input = Input{},
+    shipGeometry = geometry,
+    shipLayers = ShipLayerClass{},
   }
-  spaceship.collider.entity = spaceship
+  
+  -- FIXME: stinky code
+  world:addEvent(spaceship, "refreshSpriteBatches")
   
   local children = {
     {
